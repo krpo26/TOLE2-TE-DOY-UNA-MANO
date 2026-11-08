@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function esAdmin() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'admin';
+    }
+    function porcentajeActual() {
+      return exists(/databases/$(database)/documents/config/comisiones)
+        ? get(/databases/$(database)/documents/config/comisiones).data.porcentaje
+        : 10;
+    }
+    match /usuarios/{uid} {
+      allow read: if request.auth != null;
+      allow create: if request.auth.uid == uid
+        && request.resource.data.rol in ['cliente', 'profesional']
+        && request.resource.data.aceptoTerminos == true;
+      allow update: if esAdmin()
+        || (request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['aceptoTerminos', 'versionTerminos', 'aceptoEn'])
+          && request.resource.data.aceptoTerminos == true);
+      allow delete: if request.auth.uid == uid;
+    }
+    match /profesionales/{uid} {
+      allow read: if request.auth != null;
+      allow create: if request.auth.uid == uid
+        && request.resource.data.activo == true
+        && get(/databases/$(database)/documents/usuarios/$(uid)).data.rol == 'profesional';
+      allow update: if (request.auth.uid == uid
+        && request.resource.data.activo == resource.data.activo) || esAdmin();
+      allow delete: if request.auth.uid == uid;
+    }
+    match /pedidos/{id} {
+      allow read: if request.auth != null;
+      allow create: if request.resource.data.clienteId == request.auth.uid
+        && request.resource.data.estado == 'abierto';
+      allow update: if (resource.data.clienteId == request.auth.uid
+        && resource.data.estado == 'abierto'
+        && request.resource.data.estado == 'asignado'
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['estado', 'presupuestoElegidoId', 'profesionalElegidoId', 'montoAcordado'])
+        && get(/databases/$(database)/documents/presupuestos/$(request.resource.data.presupuestoElegidoId)).data.monto == request.resource.data.montoAcordado
+        && get(/databases/$(database)/documents/presupuestos/$(request.resource.data.presupuestoElegidoId)).data.pedidoId == id
+        && get(/databases/$(database)/documents/presupuestos/$(request.resource.data.presupuestoElegidoId)).data.profesionalId == request.resource.data.profesionalElegidoId)
+        || esAdmin();
+      allow delete: if resource.data.clienteId == request.auth.uid;
+    }
+    match /presupuestos/{id} {
+      allow read: if request.auth != null
+        && (resource.data.clienteId == request.auth.uid
+          || resource.data.profesionalId == request.auth.uid
+          || esAdmin());
+      allow create: if request.resource.data.profesionalId == request.auth.uid
+        && request.resource.data.estado == 'pendiente'
+        && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'profesional'
+        && get(/databases/$(database)/documents/pedidos/$(request.resource.data.pedidoId)).data.estado == 'abierto'
+        && get(/databases/$(database)/documents/pedidos/$(request.resource.data.pedidoId)).data.clienteId == request.resource.data.clienteId;
+      allow update: if (resource.data.profesionalId == request.auth.uid
+          && resource.data.estado == 'pendiente'
+          && request.resource.data.estado == 'pendiente'
+          && request.resource.data.clienteId == resource.data.clienteId
+          && request.resource.data.pedidoId == resource.data.pedidoId
+          && get(/databases/$(database)/documents/pedidos/$(resource.data.pedidoId)).data.estado == 'abierto')
+        || (resource.data.clienteId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado']));
+      allow delete: if resource.data.profesionalId == request.auth.uid
+        || resource.data.clienteId == request.auth.uid;
+    }
+    match /config/{doc} {
+      allow read: if request.auth != null;
+      allow write: if esAdmin();
+    }
+    match /comisiones/{pedidoId} {
+      allow read: if request.auth != null
+        && (resource.data.profesionalId == request.auth.uid
+          || resource.data.clienteId == request.auth.uid
+          || esAdmin());
+      allow create: if request.auth.uid == request.resource.data.clienteId
+        && request.resource.data.estado == 'pendiente'
+        && getAfter(/databases/$(database)/documents/pedidos/$(pedidoId)).data.clienteId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/pedidos/$(pedidoId)).data.estado == 'asignado'
+        && request.resource.data.montoAcordado == getAfter(/databases/$(database)/documents/pedidos/$(pedidoId)).data.montoAcordado
+        && request.resource.data.profesionalId == getAfter(/databases/$(database)/documents/pedidos/$(pedidoId)).data.profesionalElegidoId
+        && request.resource.data.porcentaje == porcentajeActual()
+        && request.resource.data.montoComision == math.floor(request.resource.data.montoAcordado * request.resource.data.porcentaje / 100);
+      allow update: if esAdmin();
+    }
+    match /profesionales/{uid}/privado/{doc} {
+      allow read, write: if request.auth.uid == uid || esAdmin();
+    }
+    match /presupuestos/{id}/privado/{doc} {
+      allow read: if get(/databases/$(database)/documents/presupuestos/$(id)).data.profesionalId == request.auth.uid
+        || (get(/databases/$(database)/documents/presupuestos/$(id)).data.clienteId == request.auth.uid
+          && get(/databases/$(database)/documents/presupuestos/$(id)).data.estado == 'aceptado')
+        || esAdmin();
+      allow create, update: if getAfter(/databases/$(database)/documents/presupuestos/$(id)).data.profesionalId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/presupuestos/$(id)).data.estado == 'pendiente';
+      allow delete: if get(/databases/$(database)/documents/presupuestos/$(id)).data.profesionalId == request.auth.uid
+        || get(/databases/$(database)/documents/presupuestos/$(id)).data.clienteId == request.auth.uid;
+    }
+    match /pedidos/{id}/privado/{doc} {
+      allow read: if get(/databases/$(database)/documents/pedidos/$(id)).data.clienteId == request.auth.uid
+        || (get(/databases/$(database)/documents/pedidos/$(id)).data.estado == 'asignado'
+          && get(/databases/$(database)/documents/pedidos/$(id)).data.profesionalElegidoId == request.auth.uid)
+        || esAdmin();
+      allow create: if getAfter(/databases/$(database)/documents/pedidos/$(id)).data.clienteId == request.auth.uid;
+      allow delete: if get(/databases/$(database)/documents/pedidos/$(id)).data.clienteId == request.auth.uid;
+    }
+    match /oficios/{id} {
+      allow read: if request.auth != null;
+      allow write: if esAdmin();
+    }
+  }
+}

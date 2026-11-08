@@ -1,0 +1,28 @@
+workflows:
+  tdum-release:
+    name: TE DOY UNA MANO - AAB y APK firmados
+    max_build_duration: 40
+    instance_type: mac_mini_m2
+    environment:
+      flutter: stable
+      android_signing:
+        - tdum_keystore   # nombre de tu keystore en Codemagic > Code signing identities
+      groups:
+        - firebase_tdum   # variable GOOGLE_SERVICES_JSON (contenido del google-services.json)
+    scripts:
+      - name: Generar carpeta android
+        script: flutter create --org com.tedoyunamano --project-name te_doy_una_mano --platforms=android .
+      - name: Firebase google-services.json
+        script: echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+      - name: Preparar Gradle (google-services, minSdk, firma)
+        script: python3 tools/preparar_android.py
+      - name: Dependencias
+        script: flutter pub get
+      - name: Compilar AAB para Google Play
+        script: flutter build appbundle --release --obfuscate --split-debug-info=build/symbols --build-number=$BUILD_NUMBER
+      - name: Compilar APK para probar en el celular
+        script: flutter build apk --release --obfuscate --split-debug-info=build/symbols --build-number=$BUILD_NUMBER
+    artifacts:
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/*.apk
+      - build/symbols/**
