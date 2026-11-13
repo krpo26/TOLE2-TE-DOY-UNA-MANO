@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'models.dart';
+import 'screens_admin_profesionales.dart';
+import 'screens_apariencia.dart';
 import 'screens_comisiones.dart';
 import 'screens_cuenta.dart';
 import 'screens_contacto.dart';
@@ -23,6 +25,13 @@ class Puerta extends StatelessWidget {
     if (s.perfil != null && !s.perfil!.aceptoTerminos) {
       return const TerminosGate();
     }
+    if (s.perfil != null && !s.perfil!.tieneTelefono) {
+      return const TelefonoGate();
+    }
+    final esAdmin = s.perfil?.esAdmin ?? false;
+    if (!esAdmin && !s.user!.emailVerified) {
+      return const VerificarEmailScreen();
+    }
     return const HomeScreen();
   }
 }
@@ -37,8 +46,10 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _nombre = TextEditingController();
   final _email = TextEditingController();
+  final _tel = TextEditingController();
   final _pass = TextEditingController();
   bool _registro = false;
+  bool _modoAdmin = false;
   bool _acepto = false;
   bool _trabajando = false;
   String _rol = 'cliente';
@@ -51,15 +62,26 @@ class _LoginScreenState extends State<LoginScreen> {
           content: Text('Tenés que aceptar los Términos y la Política de Privacidad')));
       return;
     }
+    if (_registro && soloDigitos(_tel.text).length < 8) {
+      msg.showSnackBar(const SnackBar(
+          content: Text('Ingresá tu número de celular con código de área')));
+      return;
+    }
     setState(() => _trabajando = true);
     try {
-      if (_registro) {
-        await sesion.registrar(_nombre.text, _email.text, _pass.text, _rol);
+      if (_modoAdmin) {
+        await sesion.ingresarAdmin(_email.text, _pass.text);
+      } else if (_registro) {
+        await sesion.registrar(
+            _nombre.text, _email.text, _pass.text, _rol, _tel.text);
       } else {
         await sesion.ingresar(_email.text, _pass.text);
       }
     } on FirebaseAuthException catch (e) {
       msg.showSnackBar(SnackBar(content: Text(e.message ?? 'Error de acceso')));
+    } on StateError {
+      msg.showSnackBar(
+          const SnackBar(content: Text('Esta cuenta no es de administrador')));
     } finally {
       if (mounted) setState(() => _trabajando = false);
     }
@@ -74,7 +96,7 @@ class _LoginScreenState extends State<LoginScreen> {
             padding: const EdgeInsets.all(24),
             child: Column(
               children: [
-                const Icon(Icons.handshake, size: 72, color: Colors.orange),
+                const LogoInicio(),
                 const SizedBox(height: 8),
                 Text('TE DOY UNA MANO!',
                     style: Theme.of(context).textTheme.headlineSmall),
@@ -95,6 +117,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: Text('Profesional / trabajador')),
                     ],
                     onChanged: (v) => setState(() => _rol = v ?? 'cliente'),
+                  ),
+                  TextField(
+                    controller: _tel,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Celular (con código de área, sin 0 ni 15)',
+                      helperText: 'Solo lo ve quien acepte tu presupuesto o pedido',
+                    ),
                   ),
                 ],
                 TextField(
@@ -121,13 +151,25 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 20),
                 FilledButton(
                   onPressed: _trabajando ? null : _enviar,
-                  child: Text(_registro ? 'Crear cuenta' : 'Ingresar'),
+                  child: Text(_modoAdmin
+                      ? 'Entrar como administrador'
+                      : (_registro ? 'Crear cuenta' : 'Ingresar')),
                 ),
-                TextButton(
+                if (!_modoAdmin)
+                  TextButton(
                   onPressed: () => setState(() => _registro = !_registro),
                   child: Text(_registro
                       ? 'Ya tengo cuenta'
                       : 'No tengo cuenta, registrarme'),
+                ),
+                TextButton(
+                  onPressed: () => setState(() {
+                    _modoAdmin = !_modoAdmin;
+                    _registro = false;
+                  }),
+                  child: Text(_modoAdmin
+                      ? 'Volver al ingreso normal'
+                      : 'Ingresar como administrador'),
                 ),
               ],
             ),
@@ -152,22 +194,6 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('TE DOY UNA MANO!'),
         actions: [
-          if (admin)
-            IconButton(
-              tooltip: 'Cargar oficios básicos',
-              icon: const Icon(Icons.playlist_add),
-              onPressed: servicio.cargarBasicos,
-            ),
-          if (admin)
-            IconButton(
-              tooltip: 'Comisiones',
-              icon: const Icon(Icons.paid),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const AdminComisionesScreen()),
-              ),
-            ),
           if (!admin)
             IconButton(
               tooltip: 'Mis pedidos',
@@ -188,24 +214,39 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
           PopupMenuButton<String>(
-            tooltip: 'Mi cuenta',
+            tooltip: 'Menú',
             icon: const Icon(Icons.account_circle),
-            onSelected: (v) => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => v == 'perfil'
-                    ? const PerfilProfesionalScreen()
-                    : v == 'trabajos'
-                        ? const MisTrabajosScreen()
-                        : v == 'comisiones'
-                            ? const MisComisionesScreen()
-                            : const CuentaScreen(),
-              ),
-            ),
+            onSelected: (v) {
+              if (v == 'basicos') {
+                servicio.cargarBasicos();
+                return;
+              }
+              final Widget pantalla = switch (v) {
+                'perfil' => const PerfilProfesionalScreen(),
+                'trabajos' => const MisTrabajosScreen(),
+                'comisiones' => const MisComisionesScreen(),
+                'admin_profesionales' => const AdminProfesionalesScreen(),
+                'admin_comisiones' => const AdminComisionesScreen(),
+                'admin_apariencia' => const AparienciaScreen(),
+                _ => const CuentaScreen(),
+              };
+              Navigator.push(
+                  context, MaterialPageRoute(builder: (_) => pantalla));
+            },
             itemBuilder: (_) => [
+              if (admin) ...const [
+                PopupMenuItem(
+                    value: 'admin_profesionales', child: Text('Profesionales')),
+                PopupMenuItem(
+                    value: 'admin_comisiones', child: Text('Comisiones')),
+                PopupMenuItem(
+                    value: 'admin_apariencia', child: Text('Apariencia')),
+                PopupMenuItem(
+                    value: 'basicos', child: Text('Cargar oficios básicos')),
+              ],
               if (perfil?.rol == 'profesional') ...const [
                 PopupMenuItem(value: 'trabajos', child: Text('Mis trabajos')),
-                PopupMenuItem(value: 'perfil', child: Text('Mi perfil')),
+                PopupMenuItem(value: 'perfil', child: Text('Mi perfil y CV')),
                 PopupMenuItem(
                     value: 'comisiones', child: Text('Mis comisiones')),
               ],
@@ -233,7 +274,10 @@ class HomeScreen extends StatelessWidget {
               icon: const Icon(Icons.request_quote),
               label: const Text('Pedir presupuesto'),
             ),
-      body: StreamBuilder<List<Oficio>>(
+      body: Column(children: [
+        const BannerInterfaz(),
+        Expanded(
+          child: StreamBuilder<List<Oficio>>(
         stream: servicio.todos(),
         builder: (context, snap) {
           if (snap.hasError) {
@@ -278,7 +322,8 @@ class HomeScreen extends StatelessWidget {
             },
           );
         },
-      ),
+      )),
+      ]),
     );
   }
 

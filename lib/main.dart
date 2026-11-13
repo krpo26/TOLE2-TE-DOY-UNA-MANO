@@ -1,21 +1,35 @@
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
+import 'apariencia_config.dart';
+import 'firebase_options_web.dart';
 import 'screens.dart';
 import 'services.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  if (kIsWeb) {
+    await Firebase.initializeApp(options: opcionesWeb);
+  } else {
+    await Firebase.initializeApp();
+  }
   try {
-    // Solo la app original instalada desde Google Play puede usar tu Firebase.
-    await FirebaseAppCheck.instance.activate(
-      androidProvider:
-          kReleaseMode ? AndroidProvider.playIntegrity : AndroidProvider.debug,
-    );
+    // Solo la app original (Play Store o tu página web) puede usar tu Firebase.
+    if (kIsWeb) {
+      if (kRecaptchaSiteKey.isNotEmpty) {
+        await FirebaseAppCheck.instance
+            .activate(webProvider: ReCaptchaV3Provider(kRecaptchaSiteKey));
+      }
+    } else {
+      await FirebaseAppCheck.instance.activate(
+        androidProvider:
+            kReleaseMode ? AndroidProvider.playIntegrity : AndroidProvider.debug,
+      );
+    }
   } catch (_) {
     // Si App Check falla, la app sigue; la protección la impone Firebase.
   }
@@ -32,14 +46,35 @@ class App extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'TE DOY UNA MANO!',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.orange),
-      ),
-      home: const Puerta(),
+    return StreamBuilder<String>(
+      stream: AparienciaService().fuente(),
+      builder: (context, snap) {
+        final fuente = snap.data ?? kFuenteDefecto;
+        final base = ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.orange),
+        );
+        return MaterialApp(
+          title: 'TE DOY UNA MANO!',
+          debugShowCheckedModeBanner: false,
+          theme: fuente == kFuenteDefecto
+              ? base
+              : base.copyWith(
+                  textTheme: GoogleFonts.getTextTheme(fuente, base.textTheme)),
+          // En pantallas anchas (web) el contenido queda centrado y angosto.
+          builder: (context, child) => ColoredBox(
+            color: const Color(0xFFEFEFEF),
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: child,
+              ),
+            ),
+          ),
+          home: const Puerta(),
+        );
+      },
     );
   }
 }

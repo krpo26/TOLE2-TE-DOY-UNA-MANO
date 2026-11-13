@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'legal_config.dart';
+import 'models.dart';
 import 'services.dart';
 
 Future<void> abrirUrl(BuildContext context, String url) async {
@@ -190,6 +191,159 @@ class CuentaScreen extends StatelessWidget {
             label: const Text('Eliminar mi cuenta'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Pantalla para usuarios que todavía no cargaron su teléfono.
+class TelefonoGate extends StatefulWidget {
+  const TelefonoGate({super.key});
+
+  @override
+  State<TelefonoGate> createState() => _TelefonoGateState();
+}
+
+class _TelefonoGateState extends State<TelefonoGate> {
+  final _tel = TextEditingController();
+  bool _guardando = false;
+
+  Future<void> _guardar() async {
+    final sesion = context.read<SesionService>();
+    final msg = ScaffoldMessenger.of(context);
+    if (soloDigitos(_tel.text).length < 8) {
+      msg.showSnackBar(
+          const SnackBar(content: Text('Ingresá un teléfono válido')));
+      return;
+    }
+    setState(() => _guardando = true);
+    try {
+      await sesion.guardarTelefono(_tel.text);
+    } catch (_) {
+      msg.showSnackBar(
+          const SnackBar(content: Text('No se pudo guardar. Probá de nuevo')));
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.phone_android, size: 56, color: Colors.orange),
+              const SizedBox(height: 16),
+              Text('Tu número de celular',
+                  style: Theme.of(context).textTheme.headlineSmall),
+              const SizedBox(height: 12),
+              const Text(
+                'Lo necesitamos para que puedan contactarte cuando se acepte un '
+                'presupuesto. Solo lo ve la otra parte del trabajo.',
+                textAlign: TextAlign.center,
+              ),
+              TextField(
+                controller: _tel,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                    labelText: 'Celular (con código de área, sin 0 ni 15)'),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: _guardando ? null : _guardar,
+                child: const Text('Guardar y continuar'),
+              ),
+              TextButton(
+                onPressed: context.read<SesionService>().salir,
+                child: const Text('Salir'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pantalla para quienes todavía no confirmaron su email.
+class VerificarEmailScreen extends StatefulWidget {
+  const VerificarEmailScreen({super.key});
+
+  @override
+  State<VerificarEmailScreen> createState() => _VerificarEmailScreenState();
+}
+
+class _VerificarEmailScreenState extends State<VerificarEmailScreen> {
+  bool _trabajando = false;
+
+  Future<void> _verificar() async {
+    final sesion = context.read<SesionService>();
+    final msg = ScaffoldMessenger.of(context);
+    setState(() => _trabajando = true);
+    try {
+      final ok = await sesion.verificarEmail();
+      if (!ok) {
+        msg.showSnackBar(const SnackBar(
+            content: Text('Todavía no figura confirmado. Abrí el link del email y probá de nuevo')));
+      }
+    } catch (_) {
+      msg.showSnackBar(
+          const SnackBar(content: Text('No se pudo verificar. Probá de nuevo')));
+    } finally {
+      if (mounted) setState(() => _trabajando = false);
+    }
+  }
+
+  Future<void> _reenviar() async {
+    final sesion = context.read<SesionService>();
+    final msg = ScaffoldMessenger.of(context);
+    try {
+      await sesion.reenviarVerificacion();
+      msg.showSnackBar(const SnackBar(content: Text('Te enviamos el email de nuevo')));
+    } catch (_) {
+      msg.showSnackBar(const SnackBar(
+          content: Text('Esperá unos minutos antes de pedir otro email')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final email = context.watch<SesionService>().user?.email ?? '';
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.mark_email_read, size: 56, color: Colors.orange),
+              const SizedBox(height: 16),
+              Text('Confirmá tu email',
+                  style: Theme.of(context).textTheme.headlineSmall),
+              const SizedBox(height: 12),
+              Text(
+                'Te enviamos un link a $email. Abrilo y después tocá el botón. '
+                'Si no lo ves, revisá la carpeta de spam.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: _trabajando ? null : _verificar,
+                child: const Text('Ya confirmé mi email'),
+              ),
+              TextButton(
+                  onPressed: _reenviar, child: const Text('Reenviar el email')),
+              TextButton(
+                onPressed: context.read<SesionService>().salir,
+                child: const Text('Salir'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

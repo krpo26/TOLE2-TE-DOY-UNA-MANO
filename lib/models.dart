@@ -8,6 +8,7 @@ class Usuario {
   final String email;
   final String rol; // cliente | profesional | admin
   final bool aceptoTerminos;
+  final bool tieneTelefono;
 
   const Usuario({
     required this.uid,
@@ -15,6 +16,7 @@ class Usuario {
     required this.email,
     required this.rol,
     this.aceptoTerminos = false,
+    this.tieneTelefono = false,
   });
 
   bool get esAdmin => rol == 'admin';
@@ -26,6 +28,7 @@ class Usuario {
         rol: d?['rol'] ?? 'cliente',
         aceptoTerminos:
             d?['aceptoTerminos'] == true && d?['versionTerminos'] == kVersionTerminos,
+        tieneTelefono: d?['tieneTelefono'] == true,
       );
 }
 

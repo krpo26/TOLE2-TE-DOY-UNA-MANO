@@ -19,8 +19,12 @@ class _PerfilProfesionalScreenState extends State<PerfilProfesionalScreen> {
   final _zona = TextEditingController();
   final _desc = TextEditingController();
   final _anios = TextEditingController();
-  final _tel = TextEditingController();
+  final _formacion = TextEditingController();
+  final _experiencia = TextEditingController();
+  final _certificaciones = TextEditingController();
+  final _referencias = TextEditingController();
   final Set<String> _oficios = {};
+  bool? _aprobado;
   bool _cargando = true;
   bool _guardando = false;
 
@@ -33,7 +37,14 @@ class _PerfilProfesionalScreenState extends State<PerfilProfesionalScreen> {
   Future<void> _cargar() async {
     final uid = context.read<SesionService>().user!.uid;
     final p = await _servicio.miPerfil(uid);
-    _tel.text = await _servicio.miTelefono(uid);
+    final cv = await _servicio.cv(uid);
+    if (cv != null) {
+      _formacion.text = (cv['formacion'] as String?) ?? '';
+      _experiencia.text = (cv['experiencia'] as String?) ?? '';
+      _certificaciones.text = (cv['certificaciones'] as String?) ?? '';
+      _referencias.text = (cv['referencias'] as String?) ?? '';
+    }
+    _aprobado = p?.activo;
     if (p != null) {
       _zona.text = p.zona;
       _desc.text = p.descripcion;
@@ -49,9 +60,10 @@ class _PerfilProfesionalScreenState extends State<PerfilProfesionalScreen> {
     final nav = Navigator.of(context);
     if (_zona.text.trim().isEmpty ||
         _oficios.isEmpty ||
-        soloDigitos(_tel.text).length < 8) {
+        _experiencia.text.trim().isEmpty) {
       msg.showSnackBar(const SnackBar(
-          content: Text('Completá tu zona, tu teléfono y elegí al menos un oficio')));
+          content: Text(
+              'Completá tu zona, tu experiencia laboral y elegí al menos un oficio')));
       return;
     }
     setState(() => _guardando = true);
@@ -63,8 +75,13 @@ class _PerfilProfesionalScreenState extends State<PerfilProfesionalScreen> {
         descripcion: _desc.text,
         anios: int.tryParse(_anios.text.trim()) ?? 0,
         oficioIds: _oficios.toList(),
-        telefono: _tel.text,
       );
+      await _servicio.guardarCv(sesion.user!.uid, {
+        'formacion': _formacion.text.trim(),
+        'experiencia': _experiencia.text.trim(),
+        'certificaciones': _certificaciones.text.trim(),
+        'referencias': _referencias.text.trim(),
+      });
       msg.showSnackBar(const SnackBar(content: Text('Perfil guardado')));
       nav.pop();
     } catch (_) {
@@ -84,19 +101,27 @@ class _PerfilProfesionalScreenState extends State<PerfilProfesionalScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                Card(
+                  color: _aprobado == true
+                      ? Colors.green.shade50
+                      : Colors.orange.shade50,
+                  child: ListTile(
+                    leading: Icon(
+                        _aprobado == true ? Icons.verified : Icons.hourglass_top),
+                    title: Text(_aprobado == true
+                        ? 'Perfil aprobado'
+                        : (_aprobado == null
+                            ? 'Completá tu perfil y tu currículum'
+                            : 'Tu currículum está en revisión')),
+                    subtitle: Text(_aprobado == true
+                        ? 'Ya aparecés en las listas y podés presupuestar.'
+                        : 'Cuando el administrador lo apruebe vas a aparecer en las listas y a poder presupuestar.'),
+                  ),
+                ),
                 TextField(
                   controller: _zona,
                   decoration: const InputDecoration(
                       labelText: 'Zona donde trabajás (barrio o ciudad)'),
-                ),
-                TextField(
-                  controller: _tel,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Tu teléfono (con código de área, sin 0 ni 15)',
-                    helperText:
-                        'Solo lo ve el cliente que acepte tu presupuesto',
-                  ),
                 ),
                 TextField(
                   controller: _anios,
@@ -134,6 +159,35 @@ class _PerfilProfesionalScreenState extends State<PerfilProfesionalScreen> {
                       ],
                     );
                   },
+                ),
+                const SizedBox(height: 24),
+                Text('Currículum vitae',
+                    style: Theme.of(context).textTheme.titleMedium),
+                TextField(
+                  controller: _experiencia,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                      labelText: 'Experiencia laboral (obligatorio)',
+                      helperText: 'Dónde trabajaste, qué hiciste y por cuánto tiempo'),
+                ),
+                TextField(
+                  controller: _formacion,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                      labelText: 'Formación y estudios'),
+                ),
+                TextField(
+                  controller: _certificaciones,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                      labelText: 'Certificaciones y matrículas'),
+                ),
+                TextField(
+                  controller: _referencias,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                      labelText: 'Referencias (nombre y contacto)',
+                      helperText: 'Solo lo ve el administrador'),
                 ),
                 const SizedBox(height: 24),
                 FilledButton(

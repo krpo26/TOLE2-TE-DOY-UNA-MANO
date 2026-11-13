@@ -1,7 +1,11 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
+import 'apariencia_config.dart';
 import 'legal_config.dart';
 import 'models.dart';
 
@@ -31,20 +35,88 @@ class SesionService extends ChangeNotifier {
         .signInWithEmailAndPassword(email: email.trim(), password: pass);
   }
 
-  Future<void> registrar(
-      String nombre, String email, String pass, String rol) async {
+  /// Ingreso de administrador: la contraseña la valida Firebase y el rol se
+  /// comprueba en Firestore. Ninguna contraseña va escrita en el código.
+  Future<void> ingresarAdmin(String email, String pass) async {
+    final cred = await FirebaseAuth.instance
+        .signInWithEmailAndPassword(email: email.trim(), password: pass);
+    final p = await _cargarPerfil(cred.user!);
+    if (!p.esAdmin) {
+      await FirebaseAuth.instance.signOut();
+      throw StateError('no-admin');
+    }
+  }
+
+  Future<void> registrar(String nombre, String email, String pass, String rol,
+      String telefono) async {
     final cred = await FirebaseAuth.instance
         .createUserWithEmailAndPassword(email: email.trim(), password: pass);
-    await _db.collection('usuarios').doc(cred.user!.uid).set({
+    try {
+      await cred.user!.sendEmailVerification();
+    } catch (_) {
+      // Si falla el envío, el usuario puede pedir el reenvío desde la app.
+    }
+    final ref = _db.collection('usuarios').doc(cred.user!.uid);
+    final batch = _db.batch();
+    batch.set(ref, {
       'nombre': nombre.trim(),
       'email': email.trim(),
       'rol': rol, // solo cliente o profesional; admin se asigna a mano
+      'tieneTelefono': true,
       'aceptoTerminos': true,
       'versionTerminos': kVersionTerminos,
       'aceptoEn': FieldValue.serverTimestamp(),
       'creado': FieldValue.serverTimestamp(),
     });
+    // El teléfono va aparte: solo lo ve su dueño, el admin y, tras aceptar
+    // un presupuesto, la otra parte del trabajo.
+    batch.set(ref.collection('privado').doc('contacto'),
+        {'telefono': soloDigitos(telefono)});
+    await batch.commit();
     perfil = await _cargarPerfil(cred.user!);
+    notifyListeners();
+  }
+
+  /// Vuelve a consultar a Firebase si el email ya fue confirmado.
+  Future<bool> verificarEmail() async {
+    final u = FirebaseAuth.instance.currentUser;
+    if (u == null) return false;
+    await u.reload();
+    final actual = FirebaseAuth.instance.currentUser;
+    // Refresca el token para que las reglas vean email_verified = true.
+    await actual?.getIdToken(true);
+    user = actual;
+    notifyListeners();
+    return actual?.emailVerified ?? false;
+  }
+
+  Future<void> reenviarVerificacion() async {
+    await FirebaseAuth.instance.currentUser?.sendEmailVerification();
+  }
+
+  Future<String> miTelefono() async {
+    try {
+      final d = await _db
+          .collection('usuarios')
+          .doc(user!.uid)
+          .collection('privado')
+          .doc('contacto')
+          .get();
+      return (d.data()?['telefono'] as String?) ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> guardarTelefono(String telefono) async {
+    final u = user!;
+    final ref = _db.collection('usuarios').doc(u.uid);
+    final batch = _db.batch();
+    batch.set(ref.collection('privado').doc('contacto'),
+        {'telefono': soloDigitos(telefono)});
+    batch.update(ref, {'tieneTelefono': true});
+    await batch.commit();
+    perfil = await _cargarPerfil(u);
     notifyListeners();
   }
 
@@ -68,6 +140,8 @@ class SesionService extends ChangeNotifier {
     final uid = u.uid;
     final hijos = <DocumentReference>[
       _db.collection('profesionales').doc(uid).collection('privado').doc('contacto'),
+      _db.collection('profesionales').doc(uid).collection('privado').doc('cv'),
+      _db.collection('usuarios').doc(uid).collection('privado').doc('contacto'),
     ];
     final padres = <DocumentReference>[
       _db.collection('profesionales').doc(uid),
@@ -156,9 +230,15 @@ class ProfesionalesService {
     return doc.exists ? Profesional.desdeDoc(doc) : null;
   }
 
+  /// El teléfono se carga al registrarse y vive en usuarios/{uid}/privado.
   Future<String> miTelefono(String uid) async {
     try {
-      final d = await _col.doc(uid).collection('privado').doc('contacto').get();
+      final d = await _db
+          .collection('usuarios')
+          .doc(uid)
+          .collection('privado')
+          .doc('contacto')
+          .get();
       return (d.data()?['telefono'] as String?) ?? '';
     } catch (_) {
       return '';
@@ -172,7 +252,6 @@ class ProfesionalesService {
     required String descripcion,
     required int anios,
     required List<String> oficioIds,
-    required String telefono,
   }) async {
     final existe = (await _col.doc(uid).get()).exists;
     await _col.doc(uid).set({
@@ -181,15 +260,39 @@ class ProfesionalesService {
       'descripcion': descripcion.trim(),
       'anios': anios,
       'oficioIds': oficioIds,
-      if (!existe) 'activo': true,
+      // Un profesional nuevo queda pendiente hasta que el admin lo apruebe.
+      if (!existe) 'activo': false,
       'actualizado': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
-    await _col
-        .doc(uid)
-        .collection('privado')
-        .doc('contacto')
-        .set({'telefono': soloDigitos(telefono)});
   }
+
+  Future<void> guardarCv(String uid, Map<String, String> datos) => _col
+      .doc(uid)
+      .collection('privado')
+      .doc('cv')
+      .set({...datos, 'enviado': FieldValue.serverTimestamp()});
+
+  Future<Map<String, dynamic>?> cv(String uid) async {
+    try {
+      final d = await _col.doc(uid).collection('privado').doc('cv').get();
+      return d.data();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Todos los profesionales: primero los pendientes de aprobación.
+  Stream<List<Profesional>> todos() => _col.snapshots().map((s) {
+        final l = s.docs.map(Profesional.desdeDoc).toList();
+        l.sort((a, b) {
+          if (a.activo != b.activo) return a.activo ? 1 : -1;
+          return a.nombre.compareTo(b.nombre);
+        });
+        return l;
+      });
+
+  Future<void> setActivo(String uid, bool activo) =>
+      _col.doc(uid).update({'activo': activo});
 
   Stream<List<Profesional>> porOficio(String oficioId) => _col
       .where('oficioIds', arrayContains: oficioId)
@@ -401,4 +504,32 @@ class ComisionesService {
         'estado': cobrada ? 'cobrada' : 'pendiente',
         'cobradoEn': cobrada ? FieldValue.serverTimestamp() : null,
       });
+}
+
+class AparienciaService {
+  final _col = _db.collection('config');
+
+  Stream<String> fuente() => _col.doc('apariencia').snapshots().map(
+      (d) => (d.data()?['fuente'] as String?) ?? kFuenteDefecto);
+
+  Future<void> guardarFuente(String f) =>
+      _col.doc('apariencia').set({'fuente': f}, SetOptions(merge: true));
+
+  /// id: 'logo' o 'banner'. Devuelve null si no hay imagen cargada.
+  Stream<Uint8List?> imagen(String id) => _col.doc(id).snapshots().map((d) {
+        final b64 = d.data()?['b64'] as String?;
+        if (b64 == null || b64.isEmpty) return null;
+        try {
+          return base64Decode(b64);
+        } catch (_) {
+          return null;
+        }
+      });
+
+  Future<void> guardarImagen(String id, Uint8List bytes) => _col.doc(id).set({
+        'b64': base64Encode(bytes),
+        'actualizado': FieldValue.serverTimestamp(),
+      });
+
+  Future<void> quitarImagen(String id) => _col.doc(id).delete();
 }

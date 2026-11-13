@@ -37,7 +37,6 @@ class NuevoPedidoScreen extends StatefulWidget {
 class _NuevoPedidoScreenState extends State<NuevoPedidoScreen> {
   final _desc = TextEditingController();
   final _zona = TextEditingController();
-  final _tel = TextEditingController();
   List<Oficio> _lista = [];
   String? _oficioId;
   bool _enviando = false;
@@ -55,21 +54,21 @@ class _NuevoPedidoScreenState extends State<NuevoPedidoScreen> {
     final oficio = _lista.where((o) => o.id == _oficioId).firstOrNull;
     if (oficio == null ||
         _desc.text.trim().isEmpty ||
-        _zona.text.trim().isEmpty ||
-        soloDigitos(_tel.text).length < 8) {
+        _zona.text.trim().isEmpty) {
       msg.showSnackBar(const SnackBar(
-          content: Text('Elegí el oficio y completá descripción, zona y teléfono')));
+          content: Text('Elegí el oficio y completá descripción y zona')));
       return;
     }
     setState(() => _enviando = true);
     try {
+      final tel = await sesion.miTelefono();
       await PedidosService().crear(
         clienteId: sesion.user!.uid,
         clienteNombre: sesion.perfil?.nombre ?? '',
         oficio: oficio,
         descripcion: _desc.text,
         zona: _zona.text,
-        telefono: _tel.text,
+        telefono: tel,
       );
       msg.showSnackBar(const SnackBar(
           content: Text('Pedido enviado. Los profesionales ya pueden presupuestar')));
@@ -116,14 +115,6 @@ class _NuevoPedidoScreenState extends State<NuevoPedidoScreen> {
             controller: _zona,
             decoration:
                 const InputDecoration(labelText: 'Dónde (barrio o ciudad)'),
-          ),
-          TextField(
-            controller: _tel,
-            keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
-              labelText: 'Tu teléfono (con código de área, sin 0 ni 15)',
-              helperText: 'Solo lo ve el profesional que elijas',
-            ),
           ),
           const SizedBox(height: 24),
           FilledButton(
@@ -311,6 +302,14 @@ class PedidosDisponiblesScreen extends StatelessWidget {
               padding: EdgeInsets.all(24),
               child: Text(
                   'Primero completá tu perfil profesional (ícono de perfil arriba) para ver pedidos.'),
+            ));
+          }
+          if (!pro.activo) {
+            return const Center(
+                child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                  'Tu perfil está en revisión. Cuando el administrador apruebe tu currículum vas a poder ver pedidos y presupuestar.'),
             ));
           }
           return StreamBuilder<List<Pedido>>(

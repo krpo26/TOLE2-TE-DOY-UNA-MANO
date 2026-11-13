@@ -18,14 +18,14 @@ service cloud.firestore {
       allow update: if esAdmin()
         || (request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['aceptoTerminos', 'versionTerminos', 'aceptoEn'])
+            .hasOnly(['aceptoTerminos', 'versionTerminos', 'aceptoEn', 'tieneTelefono'])
           && request.resource.data.aceptoTerminos == true);
       allow delete: if request.auth.uid == uid;
     }
     match /profesionales/{uid} {
       allow read: if request.auth != null;
       allow create: if request.auth.uid == uid
-        && request.resource.data.activo == true
+        && request.resource.data.activo == false
         && get(/databases/$(database)/documents/usuarios/$(uid)).data.rol == 'profesional';
       allow update: if (request.auth.uid == uid
         && request.resource.data.activo == resource.data.activo) || esAdmin();
@@ -34,6 +34,7 @@ service cloud.firestore {
     match /pedidos/{id} {
       allow read: if request.auth != null;
       allow create: if request.resource.data.clienteId == request.auth.uid
+        && request.auth.token.email_verified == true
         && request.resource.data.estado == 'abierto';
       allow update: if (resource.data.clienteId == request.auth.uid
         && resource.data.estado == 'abierto'
@@ -52,8 +53,10 @@ service cloud.firestore {
           || resource.data.profesionalId == request.auth.uid
           || esAdmin());
       allow create: if request.resource.data.profesionalId == request.auth.uid
+        && request.auth.token.email_verified == true
         && request.resource.data.estado == 'pendiente'
         && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'profesional'
+        && get(/databases/$(database)/documents/profesionales/$(request.auth.uid)).data.activo == true
         && get(/databases/$(database)/documents/pedidos/$(request.resource.data.pedidoId)).data.estado == 'abierto'
         && get(/databases/$(database)/documents/pedidos/$(request.resource.data.pedidoId)).data.clienteId == request.resource.data.clienteId;
       allow update: if (resource.data.profesionalId == request.auth.uid
@@ -68,7 +71,7 @@ service cloud.firestore {
         || resource.data.clienteId == request.auth.uid;
     }
     match /config/{doc} {
-      allow read: if request.auth != null;
+      allow read: if doc in ['apariencia', 'logo', 'banner'] || request.auth != null;
       allow write: if esAdmin();
     }
     match /comisiones/{pedidoId} {
@@ -85,6 +88,9 @@ service cloud.firestore {
         && request.resource.data.porcentaje == porcentajeActual()
         && request.resource.data.montoComision == math.floor(request.resource.data.montoAcordado * request.resource.data.porcentaje / 100);
       allow update: if esAdmin();
+    }
+    match /usuarios/{uid}/privado/{doc} {
+      allow read, write: if request.auth.uid == uid || esAdmin();
     }
     match /profesionales/{uid}/privado/{doc} {
       allow read, write: if request.auth.uid == uid || esAdmin();

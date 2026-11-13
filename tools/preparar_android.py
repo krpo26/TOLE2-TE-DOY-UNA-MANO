@@ -18,10 +18,8 @@ def fallar(msg):
     sys.exit('ERROR preparar_android: ' + msg)
 
 
-# La firma es opcional: sin keystore (build debug) se omite y se usa la firma debug.
-firmar = bool(os.environ.get('CM_KEYSTORE_PATH'))
-if not firmar:
-    print('AVISO: sin keystore, se omite la firma de release (build debug).')
+if not os.environ.get('CM_KEYSTORE_PATH'):
+    fallar('falta el keystore: configurá android_signing en Codemagic')
 
 # 1) settings: plugin google-services
 s = settings.read_text()
@@ -60,9 +58,8 @@ if kts:
     }
 
 '''
-    if firmar:
-        a = a.replace('signingConfigs.getByName("debug")',
-                      'signingConfigs.getByName("release")', 1)
+    a = a.replace('signingConfigs.getByName("debug")',
+                  'signingConfigs.getByName("release")', 1)
 else:
     a = a.replace('minSdkVersion flutter.minSdkVersion',
                   'minSdkVersion Math.max(23, flutter.minSdkVersion)', 1)
@@ -76,17 +73,16 @@ else:
     }
 
 '''
-    if firmar:
-        a = a.replace('signingConfig signingConfigs.debug',
-                      'signingConfig signingConfigs.release', 1)
+    a = a.replace('signingConfig signingConfigs.debug',
+                  'signingConfig signingConfigs.release', 1)
 
-if firmar and 'signingConfigs {' not in a:
+if 'signingConfigs {' not in a:
     if '    buildTypes {' not in a:
         fallar('no encontré buildTypes en ' + app.name)
     a = a.replace('    buildTypes {', firma + '    buildTypes {', 1)
 app.write_text(a)
 
-if firmar and 'signingConfigs.getByName("release")' not in a and 'signingConfigs.release' not in a:
+if 'signingConfigs.getByName("release")' not in a and 'signingConfigs.release' not in a:
     fallar('no pude activar la firma de release')
 
 print('OK. Revisá el targetSdk que usa tu Flutter:')
