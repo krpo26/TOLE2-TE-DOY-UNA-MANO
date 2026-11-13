@@ -1,12 +1,10 @@
 workflows:
-  tdum-release:
-    name: TE DOY UNA MANO - AAB y APK firmados
+  tdum-debug:
+    name: TE DOY UNA MANO - APK debug (sin firma)
     max_build_duration: 40
     instance_type: mac_mini_m2
     environment:
       flutter: stable
-      android_signing:
-        - tdum_keystore   # nombre de tu keystore en Codemagic > Code signing identities
       groups:
         - firebase_tdum   # variable GOOGLE_SERVICES_JSON (contenido del google-services.json)
     scripts:
@@ -18,37 +16,7 @@ workflows:
         script: python3 tools/preparar_android.py
       - name: Dependencias
         script: flutter pub get
-      - name: Compilar AAB para Google Play
-        script: flutter build appbundle --release --obfuscate --split-debug-info=build/symbols --build-number=$BUILD_NUMBER
-      - name: Compilar APK para probar en el celular
-        script: flutter build apk --release --obfuscate --split-debug-info=build/symbols --build-number=$BUILD_NUMBER
+      - name: Compilar APK debug para probar en el celular
+        script: flutter build apk --debug --build-number=$BUILD_NUMBER
     artifacts:
-      - build/**/outputs/**/*.aab
       - build/**/outputs/**/*.apk
-      - build/symbols/**
-
-  tdum-web:
-    name: TE DOY UNA MANO - Web (Firebase Hosting)
-    max_build_duration: 30
-    instance_type: mac_mini_m2
-    environment:
-      flutter: stable
-      groups:
-        - firebase_tdum   # FIREBASE_PROJECT_ID y FIREBASE_SERVICE_ACCOUNT (JSON de la cuenta de servicio)
-    scripts:
-      - name: Generar carpeta web
-        script: flutter create --org com.tedoyunamano --project-name te_doy_una_mano --platforms=web .
-      - name: Título y nombre de la página
-        script: python3 tools/preparar_web.py
-      - name: Dependencias
-        script: flutter pub get
-      - name: Compilar web
-        script: flutter build web --release
-      - name: Publicar en Firebase Hosting
-        script: |
-          echo "$FIREBASE_SERVICE_ACCOUNT" > "$HOME/firebase-sa.json"
-          export GOOGLE_APPLICATION_CREDENTIALS="$HOME/firebase-sa.json"
-          npm install -g firebase-tools
-          firebase deploy --only hosting --project "$FIREBASE_PROJECT_ID"
-    artifacts:
-      - build/web/**
